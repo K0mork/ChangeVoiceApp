@@ -5,17 +5,12 @@ import Foundation
 final class VoiceAudioController: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var isRequestingPermission = false
-    @Published private(set) var statusMessage = "準備ができています"
-    @Published private(set) var statusKind: StatusKind = .ready
+    @Published private(set) var permissionDenied = false
     @Published var pitchSemitones = 0.0 {
         didSet { pitchUnit?.pitch = Float(pitchSemitones * 100) }
     }
     @Published var tone = 0.0 {
         didSet { applyTone() }
-    }
-
-    enum StatusKind: Equatable {
-        case ready, active, attention
     }
 
     private let session = AVAudioSession.sharedInstance()
@@ -25,6 +20,8 @@ final class VoiceAudioController: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var permissionRequestID: UUID?
     private var isForeground = true
+    private var isUserMuted = false
+    private var requiresManualResume = false
 
     init() {
         let center = NotificationCenter.default
@@ -36,7 +33,7 @@ final class VoiceAudioController: ObservableObject {
             guard let rawType = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                   AVAudioSession.InterruptionType(rawValue: rawType) == .began else { return }
             Task { @MainActor [weak self] in
-                self?.stop(message: "通話などで一時停止しました")
+                self?.stopForSystemChange()
             }
         })
         observers.append(center.addObserver(
@@ -48,8 +45,7 @@ final class VoiceAudioController: ObservableObject {
                   let reason = AVAudioSession.RouteChangeReason(rawValue: rawReason),
                   reason != .categoryChange else { return }
             Task { @MainActor [weak self] in
-                guard self?.isRunning == true else { return }
-                self?.stop(message: "音声の接続先が変わったため停止しました")
+                self?.stopForSystemChange()
             }
         })
     }
@@ -58,35 +54,38 @@ final class VoiceAudioController: ObservableObject {
         observers.forEach(NotificationCenter.default.removeObserver)
     }
 
-    func toggle() {
-        guard !isRequestingPermission else { return }
+    func activateForForeground() {
+        isForeground = true
+        guard !isUserMuted, !requiresManualResume else { return }
+        requestPermissionAndStart()
+    }
+
+    func enterBackground() {
+        isForeground = false
+        permissionRequestID = nil
+        isRequestingPermission = false
+        stopEngine()
+    }
+
+    func toggleMute() {
+        guard !isRequestingPermission, !permissionDenied else { return }
         if isRunning {
-            stop(message: "停止しました")
+            isUserMuted = true
+            stopEngine()
         } else {
+            isUserMuted = false
+            requiresManualResume = false
             requestPermissionAndStart()
         }
     }
 
-    func setForeground(_ isForeground: Bool) {
-        self.isForeground = isForeground
-        guard !isForeground else { return }
-        if isRequestingPermission {
-            permissionRequestID = nil
-            isRequestingPermission = false
-            statusKind = .attention
-            statusMessage = "画面に戻ってからもう一度開始してください"
-        }
-        if isRunning {
-            stop(message: "画面を離れたため停止しました")
-        }
-    }
-
     private func requestPermissionAndStart() {
+        guard isForeground, !isRunning, !isRequestingPermission, !requiresManualResume, !isUserMuted else { return }
         let requestID = UUID()
         permissionRequestID = requestID
         isRequestingPermission = true
-        statusKind = .ready
-        statusMessage = "マイクの使用許可を確認しています…"
+        permissionDenied = false
+
         AVAudioApplication.requestRecordPermission { [weak self] granted in
             Task { @MainActor [weak self] in
                 guard let self, self.permissionRequestID == requestID else { return }
@@ -94,8 +93,7 @@ final class VoiceAudioController: ObservableObject {
                 self.isRequestingPermission = false
                 guard self.isForeground else { return }
                 guard granted else {
-                    self.statusKind = .attention
-                    self.statusMessage = "マイクの使用が許可されていません。設定から変更できます"
+                    self.permissionDenied = true
                     return
                 }
                 self.startEngine()
@@ -104,7 +102,7 @@ final class VoiceAudioController: ObservableObject {
     }
 
     private func startEngine() {
-        guard !isRunning, isForeground else { return }
+        guard isForeground, !isRunning, !requiresManualResume, !isUserMuted else { return }
         do {
             try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
             try session.setActive(true)
@@ -148,16 +146,15 @@ final class VoiceAudioController: ObservableObject {
             pitchUnit = pitch
             equalizer = eq
             isRunning = true
-            statusKind = .active
-            statusMessage = "変声中 · 音量は控えめです"
+            permissionDenied = false
         } catch {
             engine?.stop()
             engine = nil
             pitchUnit = nil
             equalizer = nil
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
-            statusKind = .attention
-            statusMessage = "音声を開始できませんでした。マイクと出力を確認してください"
+            isRunning = false
+            requiresManualResume = true
         }
     }
 
@@ -167,17 +164,21 @@ final class VoiceAudioController: ObservableObject {
         bands[1].gain = Float(tone * 5)
     }
 
-    private func stop(message: String) {
+    private func stopForSystemChange() {
+        guard isRunning || isRequestingPermission else { return }
+        requiresManualResume = true
         permissionRequestID = nil
         isRequestingPermission = false
+        stopEngine()
+    }
+
+    private func stopEngine() {
         engine?.stop()
         engine = nil
         pitchUnit = nil
         equalizer = nil
         try? session.setActive(false, options: .notifyOthersOnDeactivation)
         isRunning = false
-        statusKind = message == "停止しました" ? .ready : .attention
-        statusMessage = message
     }
 
     private enum AudioError: Error {

@@ -1,389 +1,333 @@
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @StateObject private var audio = VoiceAudioController()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
 
-    private let ink = Color(red: 0.11, green: 0.12, blue: 0.14)
-    private let paper = Color(red: 0.96, green: 0.94, blue: 0.89)
-    private let red = Color(red: 0.78, green: 0.16, blue: 0.19)
+    private let red = Color(red: 0.66, green: 0.045, blue: 0.075)
+    private let brightRed = Color(red: 0.91, green: 0.12, blue: 0.14)
+    private let charcoal = Color(red: 0.035, green: 0.043, blue: 0.052)
 
     var body: some View {
-        ZStack {
-            paper.ignoresSafeArea()
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 24) {
-                    header
-                    introduction
-                    controlPanel
-                    actionButton
-                    safetyNote
-                    footer
+        GeometryReader { geometry in
+            let size = geometry.size
+            let dialSize = min(size.height * 0.80, size.width * 0.36)
+
+            ZStack {
+                Color(red: 0.025, green: 0.028, blue: 0.032)
+
+                BowTieChassis(red: red, highlight: brightRed)
+                    .padding(.horizontal, size.width * 0.012)
+                    .padding(.vertical, size.height * 0.035)
+                    .shadow(color: .black.opacity(0.58), radius: 32, x: 0, y: 23)
+
+                HStack(spacing: size.height * 0.16) {
+                    VoiceDial(
+                        value: Binding(
+                            get: { (audio.pitchSemitones + 6) / 12 },
+                            set: { audio.pitchSemitones = ($0 * 12) - 6 }
+                        ),
+                        diameter: dialSize,
+                        accessibilityValue: String(format: "%+.1f セミトーン", audio.pitchSemitones),
+                        accessibilityLabel: "声の高さ",
+                        accessibilityIdentifier: "pitch-dial"
+                    )
+
+                    VoiceDial(
+                        value: Binding(
+                            get: { (audio.tone + 1) / 2 },
+                            set: { audio.tone = ($0 * 2) - 1 }
+                        ),
+                        diameter: dialSize,
+                        accessibilityValue: String(format: "%+.0f", audio.tone * 100),
+                        accessibilityLabel: "声の響き",
+                        accessibilityIdentifier: "tone-dial"
+                    )
                 }
-                .frame(maxWidth: 520)
-                .padding(.horizontal, 24)
-                .padding(.top, 12)
-                .padding(.bottom, 24)
-                .frame(maxWidth: .infinity)
+                .frame(width: size.width * 0.87, height: size.height * 0.88)
+                .position(x: size.width / 2, y: size.height / 2)
+
+                MuteControl(isRunning: audio.isRunning, isEnabled: !audio.permissionDenied, action: audio.toggleMute)
+                    .position(x: size.width / 2, y: size.height / 2)
+
+                if audio.permissionDenied {
+                    Button {
+                        if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                            openURL(settingsURL)
+                        }
+                    } label: {
+                        Image(systemName: "mic.slash.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color(red: 1, green: 0.76, blue: 0.52))
+                            .frame(width: 42, height: 42)
+                            .background(.black.opacity(0.55), in: Circle())
+                            .overlay(Circle().stroke(.white.opacity(0.32), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("設定でマイクを許可")
+                    .accessibilityHint("アプリの設定を開きます")
+                    .position(x: size.width * 0.945, y: size.height * 0.13)
+                }
             }
+            .frame(width: size.width, height: size.height)
+            .clipped()
         }
-        .preferredColorScheme(.light)
+        .background(charcoal)
+        .ignoresSafeArea()
+        .preferredColorScheme(.dark)
+        .statusBarHidden(true)
+        .onAppear {
+            audio.activateForForeground()
+        }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
-                audio.setForeground(true)
+                audio.activateForForeground()
             case .background:
-                audio.setForeground(false)
+                audio.enterBackground()
             case .inactive:
+                // iOS presents microphone permission while the app is inactive.
                 break
             @unknown default:
-                audio.setForeground(false)
+                audio.enterBackground()
             }
         }
-    }
-
-    private var header: some View {
-        HStack(spacing: 10) {
-            BowTieMark(color: red)
-                .frame(width: 31, height: 23)
-            Text("VOICE STUDIO")
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
-                .tracking(2.2)
-                .foregroundStyle(ink)
-            Spacer()
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 7, height: 7)
-                Text(audio.isRunning ? "LIVE" : "STANDBY")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .tracking(1.1)
-                    .foregroundStyle(ink.opacity(0.72))
-            }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 8)
-            .background(.white.opacity(0.7), in: Capsule())
-            .overlay(Capsule().stroke(ink.opacity(0.08), lineWidth: 1))
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(audio.isRunning ? "動作中" : "待機中")
-        }
-        .padding(.bottom, 4)
-    }
-
-    private var introduction: some View {
-        VStack(spacing: 9) {
-            Text("声を、少しだけ\n変えてみる。")
-                .font(.system(size: 34, weight: .bold, design: .rounded))
-                .tracking(-1.1)
-                .lineSpacing(1)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(ink)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text("マイクの声をリアルタイムに加工します")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(ink.opacity(0.6))
-
-            BowTieMark(color: red)
-                .frame(width: 104, height: 62)
-                .padding(.top, 4)
-                .accessibilityHidden(true)
-        }
-    }
-
-    private var controlPanel: some View {
-        VStack(spacing: 18) {
-            HStack {
-                Text("TONE CONTROLS")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .tracking(1.7)
-                Spacer()
-                Text("INPUT  →  OUTPUT")
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .tracking(0.5)
-                    .foregroundStyle(.white.opacity(0.48))
-            }
-            .foregroundStyle(.white.opacity(0.78))
-
-            HStack(spacing: 8) {
-                DialView(
-                    title: "PITCH",
-                    subtitle: "声の高さ",
-                    value: Binding(
-                        get: { (audio.pitchSemitones + 6) / 12 },
-                        set: { audio.pitchSemitones = ($0 * 12) - 6 }
-                    ),
-                    displayValue: String(format: "%+.1f", audio.pitchSemitones),
-                    unit: "SEMITONES",
-                    accent: Color(red: 0.92, green: 0.43, blue: 0.32)
-                )
-
-                Rectangle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 1, height: 140)
-
-                DialView(
-                    title: "TONE",
-                    subtitle: "声の響き",
-                    value: Binding(
-                        get: { (audio.tone + 1) / 2 },
-                        set: { audio.tone = ($0 * 2) - 1 }
-                    ),
-                    displayValue: String(format: "%+.0f", audio.tone * 100),
-                    unit: "WARM  /  BRIGHT",
-                    accent: Color(red: 0.94, green: 0.72, blue: 0.40)
-                )
-            }
-
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.counterclockwise")
-                    .font(.system(size: 10, weight: .bold))
-                Text("つまみをドラッグして調整")
-                    .font(.system(size: 11, weight: .medium))
-                Spacer()
-                Button("リセット") {
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        audio.pitchSemitones = 0
-                        audio.tone = 0
-                    }
-                }
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white.opacity(0.82))
-                .accessibilityHint("高さと響きを初期値に戻します")
-            }
-            .foregroundStyle(.white.opacity(0.55))
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 18)
-        .background(
-            LinearGradient(
-                colors: [Color(red: 0.15, green: 0.17, blue: 0.19), ink],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 26, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(.white.opacity(0.14), lineWidth: 1)
-        }
-        .shadow(color: ink.opacity(0.13), radius: 22, x: 0, y: 13)
-    }
-
-    private var actionButton: some View {
-        VStack(spacing: 11) {
-            Button {
-                audio.toggle()
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: audio.isRunning ? "stop.fill" : "waveform")
-                        .font(.system(size: 14, weight: .black))
-                    Text(audio.isRequestingPermission ? "許可を確認中…" : (audio.isRunning ? "変声を停止" : "マイクを開始"))
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                    Spacer()
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 13, weight: .bold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 21)
-                .frame(height: 58)
-                .background(audio.isRunning ? ink : red, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .shadow(color: (audio.isRunning ? ink : red).opacity(0.2), radius: 12, x: 0, y: 7)
-            }
-            .buttonStyle(.plain)
-            .disabled(audio.isRequestingPermission)
-            .opacity(audio.isRequestingPermission ? 0.68 : 1)
-            .accessibilityHint(audio.isRunning ? "マイク入力と音声出力をすぐに停止します" : "タップするとマイクの使用許可を確認します")
-
-            HStack(spacing: 7) {
-                Image(systemName: audio.statusKind == .attention ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
-                    .font(.system(size: 12))
-                Text(audio.statusMessage)
-                    .font(.system(size: 12, weight: .medium))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .foregroundStyle(statusMessageColor)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(audio.statusKind == .attention ? .updatesFrequently : [])
-        }
-    }
-
-    private var safetyNote: some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: "speaker.wave.2.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(red)
-                .padding(.top, 2)
-            Text("スピーカーの音がマイクに戻るとハウリングします。開始時の音量は小さめです。周囲に配慮し、必要ならイヤホンをお使いください。")
-                .font(.system(size: 11, weight: .medium))
-                .lineSpacing(3)
-                .foregroundStyle(ink.opacity(0.66))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var footer: some View {
-        HStack {
-            Text("PITCH SHIFT ·  ±6 semitones")
-            Spacer(minLength: 10)
-            Text("TONE ·  EQ COLOR")
-        }
-        .font(.system(size: 8, weight: .bold, design: .monospaced))
-        .tracking(0.45)
-        .foregroundStyle(ink.opacity(0.42))
-    }
-
-    private var statusColor: Color {
-        switch audio.statusKind {
-        case .ready: return Color(red: 0.47, green: 0.62, blue: 0.48)
-        case .active: return Color(red: 0.29, green: 0.66, blue: 0.42)
-        case .attention: return Color(red: 0.81, green: 0.42, blue: 0.22)
-        }
-    }
-
-    private var statusMessageColor: Color {
-        audio.statusKind == .attention ? red : ink.opacity(0.62)
     }
 }
 
-private struct BowTieMark: View {
-    var color: Color
+private struct BowTieChassis: View {
+    let red: Color
+    let highlight: Color
 
     var body: some View {
         Canvas { context, size in
-            let midX = size.width / 2
-            let midY = size.height / 2
-            let left = Path { path in
-                path.move(to: CGPoint(x: midX - 4, y: midY - 8))
-                path.addLine(to: CGPoint(x: size.width * 0.06, y: size.height * 0.08))
-                path.addQuadCurve(to: CGPoint(x: size.width * 0.04, y: size.height * 0.5), control: CGPoint(x: size.width * 0.01, y: size.height * 0.3))
-                path.addQuadCurve(to: CGPoint(x: size.width * 0.06, y: size.height * 0.92), control: CGPoint(x: size.width * 0.01, y: size.height * 0.7))
-                path.addLine(to: CGPoint(x: midX - 4, y: midY + 8))
-                path.closeSubpath()
-            }
-            let right = Path { path in
-                path.move(to: CGPoint(x: midX + 4, y: midY - 8))
-                path.addLine(to: CGPoint(x: size.width * 0.94, y: size.height * 0.08))
-                path.addQuadCurve(to: CGPoint(x: size.width * 0.96, y: size.height * 0.5), control: CGPoint(x: size.width * 0.99, y: size.height * 0.3))
-                path.addQuadCurve(to: CGPoint(x: size.width * 0.94, y: size.height * 0.92), control: CGPoint(x: size.width * 0.99, y: size.height * 0.7))
-                path.addLine(to: CGPoint(x: midX + 4, y: midY + 8))
-                path.closeSubpath()
-            }
-            context.fill(left, with: .linearGradient(Gradient(colors: [color.opacity(0.84), color]), startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: midX, y: size.height)))
-            context.fill(right, with: .linearGradient(Gradient(colors: [color, color.opacity(0.78)]), startPoint: CGPoint(x: midX, y: 0), endPoint: CGPoint(x: size.width, y: size.height)))
+            let left = wingPath(size: size, isLeft: true)
+            let right = wingPath(size: size, isLeft: false)
+            let gradient = Gradient(stops: [
+                .init(color: highlight.opacity(0.94), location: 0),
+                .init(color: red, location: 0.45),
+                .init(color: Color(red: 0.30, green: 0.015, blue: 0.035), location: 1)
+            ])
+            let shading = GraphicsContext.Shading.linearGradient(
+                gradient,
+                startPoint: CGPoint(x: size.width * 0.2, y: 0),
+                endPoint: CGPoint(x: size.width * 0.8, y: size.height)
+            )
+
+            context.addFilter(.shadow(color: .black.opacity(0.45), radius: 18, x: 0, y: 12))
+            context.fill(left, with: shading)
+            context.fill(right, with: shading)
+            context.stroke(left, with: .color(.white.opacity(0.28)), lineWidth: 1.5)
+            context.stroke(right, with: .color(.white.opacity(0.28)), lineWidth: 1.5)
 
             var leftFold = Path()
-            leftFold.move(to: CGPoint(x: size.width * 0.30, y: size.height * 0.18))
-            leftFold.addLine(to: CGPoint(x: midX - 2, y: midY))
-            leftFold.addLine(to: CGPoint(x: size.width * 0.30, y: size.height * 0.82))
-            context.stroke(leftFold, with: .color(.white.opacity(0.17)), lineWidth: max(1, size.width * 0.015))
+            leftFold.move(to: CGPoint(x: size.width * 0.31, y: size.height * 0.12))
+            leftFold.addQuadCurve(
+                to: CGPoint(x: size.width * 0.31, y: size.height * 0.88),
+                control: CGPoint(x: size.width * 0.21, y: size.height * 0.5)
+            )
             var rightFold = Path()
-            rightFold.move(to: CGPoint(x: size.width * 0.70, y: size.height * 0.18))
-            rightFold.addLine(to: CGPoint(x: midX + 2, y: midY))
-            rightFold.addLine(to: CGPoint(x: size.width * 0.70, y: size.height * 0.82))
-            context.stroke(rightFold, with: .color(.black.opacity(0.12)), lineWidth: max(1, size.width * 0.015))
-
-            let knot = CGRect(x: midX - 4, y: midY - 8, width: 8, height: 16)
-            context.fill(Path(roundedRect: knot, cornerRadius: 2), with: .color(color.opacity(0.9)))
+            rightFold.move(to: CGPoint(x: size.width * 0.69, y: size.height * 0.12))
+            rightFold.addQuadCurve(
+                to: CGPoint(x: size.width * 0.69, y: size.height * 0.88),
+                control: CGPoint(x: size.width * 0.79, y: size.height * 0.5)
+            )
+            context.stroke(leftFold, with: .color(.white.opacity(0.1)), lineWidth: 1)
+            context.stroke(rightFold, with: .color(.black.opacity(0.22)), lineWidth: 1)
         }
-        .shadow(color: color.opacity(0.2), radius: 3, y: 2)
+        .overlay {
+            BowTieShape()
+                .stroke(.black.opacity(0.42), lineWidth: 1)
+                .padding(1)
+        }
+        .overlay {
+            CenterKnot()
+                .fill(
+                    LinearGradient(
+                        colors: [highlight, red, Color(red: 0.37, green: 0.02, blue: 0.045)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(CenterKnot().stroke(.white.opacity(0.32), lineWidth: 1))
+                .frame(width: 64, height: 102)
+                .shadow(color: .black.opacity(0.45), radius: 9, x: 0, y: 6)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func wingPath(size: CGSize, isLeft: Bool) -> Path {
+        let left = BowTieShape.leftWing(in: size)
+        guard !isLeft else { return left }
+        return left.applying(CGAffineTransform(scaleX: -1, y: 1).translatedBy(x: -size.width, y: 0))
     }
 }
 
-private struct DialView: View {
-    let title: String
-    let subtitle: String
-    @Binding var value: Double
-    let displayValue: String
-    let unit: String
-    let accent: Color
-
-    private let dialSize: CGFloat = 122
-    private let travelDegrees = 270.0
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Text(title)
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                .tracking(1.8)
-                .foregroundStyle(.white.opacity(0.9))
-            Text(subtitle)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.white.opacity(0.48))
-
-            ZStack {
-                Circle()
-                    .stroke(.white.opacity(0.09), lineWidth: 1)
-                    .frame(width: dialSize - 3, height: dialSize - 3)
-                ForEach(0..<25, id: \.self) { index in
-                    Capsule()
-                        .fill(indexProgress(index) <= value ? accent.opacity(0.9) : .white.opacity(0.22))
-                        .frame(width: index.isMultiple(of: 4) ? 2.2 : 1.3, height: index.isMultiple(of: 4) ? 7 : 4)
-                        .offset(y: -(dialSize / 2 - 2))
-                        .rotationEffect(.degrees(-135 + Double(index) * (travelDegrees / 24)))
-                }
-                Circle()
-                    .fill(
-                        LinearGradient(colors: [Color(red: 0.30, green: 0.32, blue: 0.34), Color(red: 0.12, green: 0.13, blue: 0.15)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    )
-                    .frame(width: 87, height: 87)
-                    .overlay(Circle().stroke(.white.opacity(0.22), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.4), radius: 7, x: 0, y: 5)
-                Circle()
-                    .fill(accent)
-                    .frame(width: 4, height: 25)
-                    .offset(y: -31)
-                    .rotationEffect(.degrees(-135 + value * travelDegrees))
-                VStack(spacing: 1) {
-                    Text(displayValue)
-                        .font(.system(size: 21, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(.white)
-                    Text(unit)
-                        .font(.system(size: 7, weight: .bold, design: .monospaced))
-                        .tracking(0.6)
-                        .foregroundStyle(.white.opacity(0.48))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
-                .offset(y: 8)
-                .allowsHitTesting(false)
-            }
-            .frame(width: dialSize, height: dialSize)
-            .contentShape(Circle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { gesture in updateValue(at: gesture.location) }
-            )
-            .accessibilityElement()
-            .accessibilityLabel(title == "PITCH" ? "声の高さ" : "声の響き")
-            .accessibilityValue(displayValue + (title == "PITCH" ? " セミトーン" : " パーセント"))
-            .accessibilityHint("上げ下げして調整します")
-            .accessibilityAdjustableAction { direction in
-                switch direction {
-                case .increment: value = min(1, value + 0.04)
-                case .decrement: value = max(0, value - 0.04)
-                @unknown default: break
-                }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
+private struct BowTieShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Self.leftWing(in: rect.size)
+        let right = path.applying(CGAffineTransform(scaleX: -1, y: 1).translatedBy(x: -rect.width, y: 0))
+        path.addPath(right)
+        return path
     }
 
-    private func indexProgress(_ index: Int) -> Double {
-        Double(index) / 24
+    static func leftWing(in size: CGSize) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: size.width * 0.465, y: size.height * 0.34))
+        path.addCurve(
+            to: CGPoint(x: size.width * 0.035, y: size.height * 0.07),
+            control1: CGPoint(x: size.width * 0.32, y: size.height * 0.24),
+            control2: CGPoint(x: size.width * 0.11, y: size.height * 0.055)
+        )
+        path.addCurve(
+            to: CGPoint(x: size.width * 0.035, y: size.height * 0.93),
+            control1: CGPoint(x: -size.width * 0.015, y: size.height * 0.34),
+            control2: CGPoint(x: -size.width * 0.015, y: size.height * 0.66)
+        )
+        path.addCurve(
+            to: CGPoint(x: size.width * 0.465, y: size.height * 0.66),
+            control1: CGPoint(x: size.width * 0.11, y: size.height * 0.945),
+            control2: CGPoint(x: size.width * 0.32, y: size.height * 0.76)
+        )
+        path.addLine(to: CGPoint(x: size.width * 0.465, y: size.height * 0.34))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct CenterKnot: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.width * 0.18, y: 0))
+        path.addQuadCurve(to: CGPoint(x: rect.width * 0.82, y: 0), control: CGPoint(x: rect.width * 0.5, y: rect.height * 0.08))
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height * 0.5))
+        path.addQuadCurve(to: CGPoint(x: rect.width * 0.82, y: rect.height), control: CGPoint(x: rect.width * 0.5, y: rect.height * 0.92))
+        path.addLine(to: CGPoint(x: rect.width * 0.18, y: rect.height))
+        path.addQuadCurve(to: CGPoint(x: 0, y: rect.height * 0.5), control: CGPoint(x: rect.width * 0.5, y: rect.height * 0.92))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct VoiceDial: View {
+    @Binding var value: Double
+    let diameter: CGFloat
+    let accessibilityValue: String
+    let accessibilityLabel: String
+    let accessibilityIdentifier: String
+
+    private let travel = 270.0
+    private let accent = Color(red: 0.98, green: 0.20, blue: 0.19)
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.16, green: 0.17, blue: 0.18), Color(red: 0.018, green: 0.02, blue: 0.023)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(Circle().stroke(.black, lineWidth: 7))
+                .overlay(Circle().stroke(.white.opacity(0.33), lineWidth: 1.2).padding(5))
+                .shadow(color: .black.opacity(0.76), radius: diameter * 0.075, x: 0, y: diameter * 0.045)
+
+            Circle()
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+                .padding(diameter * 0.15)
+
+            ForEach(0..<41, id: \.self) { index in
+                let progress = Double(index) / 40
+                Capsule()
+                    .fill(progress <= value ? accent : .white.opacity(index.isMultiple(of: 5) ? 0.65 : 0.28))
+                    .frame(
+                        width: index.isMultiple(of: 5) ? max(2, diameter * 0.009) : max(1, diameter * 0.005),
+                        height: index.isMultiple(of: 5) ? diameter * 0.036 : diameter * 0.021
+                    )
+                    .offset(y: -diameter * 0.425)
+                    .rotationEffect(.degrees(-135 + progress * travel))
+            }
+
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color(red: 0.2, green: 0.21, blue: 0.22), Color(red: 0.055, green: 0.06, blue: 0.065)],
+                        center: .init(x: 0.34, y: 0.28),
+                        startRadius: 1,
+                        endRadius: diameter * 0.33
+                    )
+                )
+                .frame(width: diameter * 0.69, height: diameter * 0.69)
+                .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+                .shadow(color: .black.opacity(0.62), radius: diameter * 0.04, x: 0, y: diameter * 0.03)
+
+            Capsule()
+                .fill(LinearGradient(colors: [.white, accent, Color(red: 0.46, green: 0.025, blue: 0.04)], startPoint: .top, endPoint: .bottom))
+                .frame(width: max(5, diameter * 0.023), height: diameter * 0.255)
+                .offset(y: -diameter * 0.17)
+                .rotationEffect(.degrees(-135 + value * travel))
+                .shadow(color: accent.opacity(0.5), radius: diameter * 0.018)
+
+            Circle()
+                .fill(Color(red: 0.06, green: 0.065, blue: 0.07))
+                .frame(width: diameter * 0.12, height: diameter * 0.12)
+                .overlay(Circle().stroke(.white.opacity(0.22), lineWidth: 1))
+
+        }
+        .frame(width: diameter, height: diameter)
+        .contentShape(Circle())
+        .gesture(DragGesture(minimumDistance: 0).onChanged { updateValue(at: $0.location) })
+        .accessibilityElement()
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityIdentifier(accessibilityIdentifier)
+        .accessibilityHint("回して調整します")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: value = min(1, value + 0.035)
+            case .decrement: value = max(0, value - 0.035)
+            @unknown default: break
+            }
+        }
     }
 
     private func updateValue(at point: CGPoint) {
-        let center = CGPoint(x: dialSize / 2, y: dialSize / 2)
-        let dx = point.x - center.x
-        let dy = point.y - center.y
-        let angle = atan2(dy, dx) * 180 / .pi + 90
-        let normalizedAngle = angle > 180 ? angle - 360 : angle
-        let clamped = min(135, max(-135, normalizedAngle))
-        value = (clamped + 135) / travelDegrees
+        let center = CGPoint(x: diameter / 2, y: diameter / 2)
+        let angle = atan2(point.y - center.y, point.x - center.x) * 180 / .pi + 90
+        let normalized = angle > 180 ? angle - 360 : angle
+        value = (min(135, max(-135, normalized)) + 135) / travel
+    }
+}
+
+private struct MuteControl: View {
+    let isRunning: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: isRunning ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white.opacity(0.92))
+                .frame(width: 46, height: 46)
+                .background(
+                    LinearGradient(
+                        colors: [Color(red: 0.32, green: 0.035, blue: 0.055), Color(red: 0.075, green: 0.025, blue: 0.032)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: Circle()
+                )
+                .overlay(Circle().stroke(.white.opacity(0.32), lineWidth: 1))
+                .shadow(color: .black.opacity(0.5), radius: 8, x: 0, y: 5)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .accessibilityLabel(isRunning ? "消音" : "音声を再開")
+        .accessibilityHint(isRunning ? "音声入力と出力を停止します" : "マイクの許可後に音声を再開します")
+        .accessibilityIdentifier("mute-control")
     }
 }
